@@ -708,18 +708,20 @@ export default class StoreImp implements Store {
   }
 
   private _adjustVisibleRange(): void {
-    // Fixed visible range: from (left/0 点) stays fixed; to follows barSpace so
-    // zoom (barSpace change) reveals fewer/more bars from the left, never moving 0 点.
+    // Fixed visible range: anchor to the LATEST bar (to = totalBarCount), from = totalBarCount - visibleBarCount.
+    // 默认（全显）时 from=0（0 点最左）；放大时 from 增大（最新在右，0 点可移出），
+    // 缩小回到全天（0 点出现）。对齐股票分时图「缩放看最新」。
     if (this._fixedVisibleRange) {
       const totalBarCount = this._dataList.length
       const visibleBarCount = this._totalBarSpace / this._barSpace
-      let from = this._fixedVisibleRange.from
-      let to = from + Math.max(1, Math.ceil(visibleBarCount))
+      let to = this._fixedVisibleRange.to
+      if (to > totalBarCount || to <= 0) {
+        to = totalBarCount
+      }
+      let from = to - Math.max(1, Math.ceil(visibleBarCount))
+      console.log('[klinecharts] _adjustVisibleRange fixed, totalBarCount=', totalBarCount, 'totalBarSpace=', this._totalBarSpace, 'barSpace=', this._barSpace, 'visibleBarCount=', visibleBarCount, 'from=', from, 'to=', to)
       if (from < 0) {
         from = 0
-      }
-      if (to > totalBarCount) {
-        to = totalBarCount
       }
       if (to < from) {
         to = from
@@ -1285,11 +1287,11 @@ export default class StoreImp implements Store {
     const zoomCoordinate: Partial<Coordinate> = coordinate ?? { x: this._crosshair.x ?? this._totalBarSpace / 2 }
 
     if (position === 'xAxis') {
-      if (this._zoomAnchor.xAxis === 'last_bar') {
+      if (this._zoomAnchor.xAxis === 'last_bar' || this._fixedVisibleRange) {
         zoomCoordinate.x = this.dataIndexToCoordinate(this._dataList.length - 1)
       }
     } else {
-      if (this._zoomAnchor.main === 'last_bar') {
+      if (this._zoomAnchor.main === 'last_bar' || this._fixedVisibleRange) {
         zoomCoordinate.x = this.dataIndexToCoordinate(this._dataList.length - 1)
       }
     }
@@ -1297,6 +1299,7 @@ export default class StoreImp implements Store {
     const floatIndex = this.coordinateToFloatIndex(x)
     const prevBarSpace = this._barSpace
     const barSpace = this._barSpace + scale * (this._barSpace / SCALE_MULTIPLIER)
+    console.log('[klinecharts] zoom scale=', scale, 'prevBarSpace=', prevBarSpace, 'barSpace=', barSpace, 'fixed=', !!this._fixedVisibleRange, 'min=', this._layoutOptions.barSpaceLimit.min)
     this.setBarSpace(barSpace, () => {
       // fixed 模式下保持 from（0 点）固定：不调整 lastBarRightSideDiffBarCount
       if (!this._fixedVisibleRange) {
@@ -1351,6 +1354,7 @@ export default class StoreImp implements Store {
    */
   setFixedVisibleRange(from: number, to: number): void {
     this._fixedVisibleRange = { from, to }
+    console.log('[klinecharts] setFixedVisibleRange from=', from, 'to=', to, 'totalBarSpace=', this._totalBarSpace)
     // 自动适配 barSpace：让固定范围内的数据铺满可视宽度（分时全天可见）。
     // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显。
     if (this._barSpaceBeforeFixed === null) {
@@ -1376,6 +1380,7 @@ export default class StoreImp implements Store {
     if (!this._fixedVisibleRange) {
       return
     }
+    console.log('[klinecharts] clearFixedVisibleRange, barSpaceBefore=', this._barSpaceBeforeFixed, 'currentBarSpace=', this._barSpace)
     this._fixedVisibleRange = null
     // 恢复 barSpaceLimit.min（如分时临时放宽的 0.1 → 4），K 线不受影响。
     try {
@@ -1390,11 +1395,16 @@ export default class StoreImp implements Store {
       const restore = this._barSpaceBeforeFixed
       this._barSpaceBeforeFixed = null
       try {
-        this.setBarSpace(restore)
+        // 确保恢复的 barSpace 不小于当前 barSpaceLimit.min（避免 K 线缩放被拒）。
+        const safeRestore = Math.max(this._layoutOptions.barSpaceLimit.min, restore)
+        this.setBarSpace(safeRestore)
       } catch (e) {
         // ignore
       }
     }
+    // 恢复交互开关（分时流程不应永久禁用 K 线的缩放/滚动）。
+    this._zoomEnabled = true
+    this._scrollEnabled = true
     this._adjustVisibleRange()
     this._chart.layout({
       measureWidth: true,
