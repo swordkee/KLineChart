@@ -35,10 +35,15 @@ export default class CandleLastPriceLabelView extends View<YAxis> {
       const precision = chartStore.getSymbol()?.pricePrecision ?? SymbolDefaultPrecisionConstants.PRICE
       const yAxis = (widget as unknown as YAxisWidget).getAxisComponent()
       const dataList = chartStore.getDataList()
-      const data = dataList[dataList.length - 1]
+      // 现价标签取「最后一根 close 有效的 bar」：跳过尾部 close:null 占位（如分时未来分钟）。
+      let dataIndex = dataList.length - 1
+      while (dataIndex >= 0 && !isValid(dataList[dataIndex]?.close)) {
+        dataIndex--
+      }
+      const data = dataList[dataIndex]
       if (isValid(data)) {
         const { close, open } = data
-        const comparePrice = lastPriceMarkStyles.compareRule === 'current_open' ? open : (dataList[dataList.length - 2]?.close ?? close)
+        const comparePrice = lastPriceMarkStyles.compareRule === 'current_open' ? open : (dataList[dataIndex - 1]?.close ?? close)
         const priceY = yAxis.convertToNicePixel(close)
         let backgroundColor = ''
         if (close > comparePrice) {
