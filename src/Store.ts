@@ -727,7 +727,6 @@ export default class StoreImp implements Store {
       if (this._lastBarRightSideDiffBarCount < minOffset) {
         this._lastBarRightSideDiffBarCount = minOffset
       }
-      console.log('[klinecharts] _adjustVisibleRange fixed, dataCount=', dataCount, 'visibleBarCount=', visibleBarCount, 'lastBarRightSide=', this._lastBarRightSideDiffBarCount, 'minOffset=', minOffset)
     }
     const totalBarCount = this._dataList.length
     const visibleBarCount = this._totalBarSpace / this._barSpace
@@ -1269,7 +1268,6 @@ export default class StoreImp implements Store {
     const floatIndex = this.coordinateToFloatIndex(x)
     const prevBarSpace = this._barSpace
     const barSpace = this._barSpace + scale * (this._barSpace / SCALE_MULTIPLIER)
-    console.log('[klinecharts] zoom scale=', scale, 'prevBarSpace=', prevBarSpace, 'barSpace=', barSpace, 'fixed=', !!this._fixedVisibleRange, 'min=', this._layoutOptions.barSpaceLimit.min)
     this.setBarSpace(barSpace, () => {
       // fixed 模式下保持 from（0 点）固定：不调整 lastBarRightSideDiffBarCount
       if (!this._fixedVisibleRange) {
@@ -1324,7 +1322,6 @@ export default class StoreImp implements Store {
    */
   setFixedVisibleRange(from: number, to: number): void {
     this._fixedVisibleRange = { from, to }
-    console.log('[klinecharts] setFixedVisibleRange from=', from, 'to=', to, 'totalBarSpace=', this._totalBarSpace)
     // 自动适配 barSpace：让固定范围内的数据铺满可视宽度（分时全天可见）。
     // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显。
     if (this._barSpaceBeforeFixed === null) {
@@ -1350,7 +1347,6 @@ export default class StoreImp implements Store {
     if (!this._fixedVisibleRange) {
       return
     }
-    console.log('[klinecharts] clearFixedVisibleRange, barSpaceBefore=', this._barSpaceBeforeFixed, 'currentBarSpace=', this._barSpace)
     this._fixedVisibleRange = null
     // 恢复 barSpaceLimit.min（如分时临时放宽的 0.1 → 4），K 线不受影响。
     try {
