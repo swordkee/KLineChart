@@ -708,52 +708,26 @@ export default class StoreImp implements Store {
   }
 
   private _adjustVisibleRange(): void {
-    // Fixed visible range: from (0 点/交易时段开始) stays at 0 permanently.
-    // 0 轴之前永不出现（from 恒 0，不偏移）；缩放只改变 to（显示 0 到 to）。
+    // Fixed mode: allow zoom/scroll freely, but the left scroll boundary is the
+    // 0 axis (trade-session start). When scrolled/zoomed so the range would start
+    // before index 0, snap _lastBarRightSideDiffBarCount so dataIndex 0 sits at
+    // the left edge (x≈0) — no blank space appears before the 0 axis.
     if (this._fixedVisibleRange) {
-      const totalBarCount = this._dataList.length
+      const dataCount = this._dataList.length
       const visibleBarCount = this._totalBarSpace / this._barSpace
-      let from = 0
-      let to = Math.max(1, Math.ceil(visibleBarCount))
-      console.log('[klinecharts] _adjustVisibleRange fixed, totalBarCount=', totalBarCount, 'totalBarSpace=', this._totalBarSpace, 'barSpace=', this._barSpace, 'visibleBarCount=', visibleBarCount, 'from=', from, 'to=', to)
-      if (to > totalBarCount) {
-        to = totalBarCount
+      // 左边界：from < 0 时强制 0 轴在左缘（0 轴前无空白）。
+      // from < 0 ⇔ lastBarRightSide < visibleBarCount - dataCount
+      const leftMinOffset = visibleBarCount - dataCount + 0.5
+      // 右边界：最新 bar（当前时间线）不超出右侧屏幕。
+      // dataIndexToCoordinate(dataCount-1) = totalBarSpace - (0.5 + lastBarRightSide)*barSpace
+      // 要求 <= totalBarSpace ⇒ lastBarRightSide >= -0.5
+      const rightMinOffset = -0.5
+      // 同时满足两个边界（取较大下限）
+      const minOffset = Math.max(leftMinOffset, rightMinOffset)
+      if (this._lastBarRightSideDiffBarCount < minOffset) {
+        this._lastBarRightSideDiffBarCount = minOffset
       }
-      if (to < from) {
-        to = from
-      }
-      this._visibleRange = { from, to, realFrom: from, realTo: to }
-      this.executeAction('onVisibleRangeChange', this._visibleRange)
-      this._visibleRangeDataList = []
-      this._visibleRangeHighLowPrice = [
-        { x: 0, price: Number.MIN_SAFE_INTEGER },
-        { x: 0, price: Number.MAX_SAFE_INTEGER }
-      ]
-      for (let i = from; i < to; i++) {
-        const kLineData = this._dataList[i]
-        if (!kLineData) {
-          continue
-        }
-        const x = this.dataIndexToCoordinate(i)
-        this._visibleRangeDataList.push({
-          dataIndex: i,
-          x,
-          data: {
-            prev: this._dataList[i - 1] ?? kLineData,
-            current: kLineData,
-            next: this._dataList[i + 1] ?? kLineData
-          }
-        })
-        if (this._visibleRangeHighLowPrice[0].price < kLineData.high) {
-          this._visibleRangeHighLowPrice[0].price = kLineData.high
-          this._visibleRangeHighLowPrice[0].x = x
-        }
-        if (this._visibleRangeHighLowPrice[1].price > kLineData.low) {
-          this._visibleRangeHighLowPrice[1].price = kLineData.low
-          this._visibleRangeHighLowPrice[1].x = x
-        }
-      }
-      return
+      console.log('[klinecharts] _adjustVisibleRange fixed, dataCount=', dataCount, 'visibleBarCount=', visibleBarCount, 'lastBarRightSide=', this._lastBarRightSideDiffBarCount, 'minOffset=', minOffset)
     }
     const totalBarCount = this._dataList.length
     const visibleBarCount = this._totalBarSpace / this._barSpace
@@ -983,7 +957,7 @@ export default class StoreImp implements Store {
   }
 
   scroll(distance: number): void {
-    if (!this._scrollEnabled || this._fixedVisibleRange) {
+    if (!this._scrollEnabled) {
       return
     }
     const distanceBarCount = distance / this._barSpace
