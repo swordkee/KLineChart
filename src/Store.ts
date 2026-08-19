@@ -663,6 +663,15 @@ export default class StoreImp implements Store {
         this._dataList[dataCount - 1] = data
         success = true
         adjustFlag = true
+      } else {
+        // timestamp 落在现有数据中间（如分时未来 close:null 占位序列中的当前分钟）：
+        // 二分定位精确 timestamp，命中则替换该 bar（补 K 更新当前分钟），否则忽略旧数据。
+        const idx = binarySearchNearest(this._dataList, 'timestamp', timestamp as never)
+        if (idx >= 0 && idx < dataCount && formatValue(this._dataList[idx], 'timestamp', 0) === timestamp) {
+          this._dataList[idx] = data
+          success = true
+          adjustFlag = true
+        }
       }
     }
     if (success && adjustFlag) {
