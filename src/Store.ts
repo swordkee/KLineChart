@@ -1326,10 +1326,20 @@ export default class StoreImp implements Store {
   /**
    * Lock the X axis to a fixed data-index range [from, to].
    * When set, scroll and zoom are disabled and the visible range stays fixed.
-   * Use clearFixedVisibleRange() to unlock.
+   * barSpace is auto-adapted so the full range fits the drawing width
+   * (used by timeshare fixed axis). Use clearFixedVisibleRange() to unlock.
    */
   setFixedVisibleRange(from: number, to: number): void {
     this._fixedVisibleRange = { from, to }
+    // 自动适配 barSpace：让固定范围内的数据铺满可视宽度（分时全天可见）。
+    // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显。
+    const count = Math.max(1, to - from)
+    if (this._totalBarSpace > 0 && count > 1) {
+      const prevMin = this._layoutOptions.barSpaceLimit.min
+      this._layoutOptions.barSpaceLimit.min = Math.min(prevMin, 0.1)
+      const space = Math.max(0.1, Math.min(this._layoutOptions.barSpaceLimit.max, this._totalBarSpace / count))
+      this.setBarSpace(space)
+    }
     this._adjustVisibleRange()
     this._chart.layout({
       measureWidth: true,
@@ -1344,6 +1354,14 @@ export default class StoreImp implements Store {
       return
     }
     this._fixedVisibleRange = null
+    // 恢复 barSpaceLimit.min（如分时临时放宽的 0.1 → 4），K 线不受影响。
+    try {
+      if (this._layoutOptions && this._layoutOptions.barSpaceLimit && this._layoutOptions.barSpaceLimit.min < 4) {
+        this._layoutOptions.barSpaceLimit.min = 4
+      }
+    } catch (e) {
+      // ignore
+    }
     this._adjustVisibleRange()
     this._chart.layout({
       measureWidth: true,
