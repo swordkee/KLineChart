@@ -293,6 +293,12 @@ export default class StoreImp implements Store {
   private _fixedVisibleRange: Nullable<{ from: number; to: number }> = null
 
   /**
+   * barSpace before setFixedVisibleRange, restored on clearFixedVisibleRange
+   * so the K-line view is not affected.
+   */
+  private _barSpaceBeforeFixed: number | null = null
+
+  /**
    * Visible data array
    */
   private _visibleRangeDataList: VisibleRangeData[] = []
@@ -693,11 +699,13 @@ export default class StoreImp implements Store {
   }
 
   private _adjustVisibleRange(): void {
-    // Fixed visible range: X axis locked to [from, to], ignore scroll/zoom/barSpace.
+    // Fixed visible range: from (left/0 点) stays fixed; to follows barSpace so
+    // zoom (barSpace change) reveals fewer/more bars from the left, never moving 0 点.
     if (this._fixedVisibleRange) {
       const totalBarCount = this._dataList.length
+      const visibleBarCount = this._totalBarSpace / this._barSpace
       let from = this._fixedVisibleRange.from
-      let to = this._fixedVisibleRange.to
+      let to = from + Math.max(1, Math.ceil(visibleBarCount))
       if (from < 0) {
         from = 0
       }
@@ -1262,7 +1270,7 @@ export default class StoreImp implements Store {
   }
 
   zoom(scale: number, coordinate: Nullable<Partial<Coordinate>>, position: 'main' | 'xAxis'): void {
-    if (!this._zoomEnabled || this._fixedVisibleRange) {
+    if (!this._zoomEnabled) {
       return
     }
     const zoomCoordinate: Partial<Coordinate> = coordinate ?? { x: this._crosshair.x ?? this._totalBarSpace / 2 }
@@ -1281,7 +1289,10 @@ export default class StoreImp implements Store {
     const prevBarSpace = this._barSpace
     const barSpace = this._barSpace + scale * (this._barSpace / SCALE_MULTIPLIER)
     this.setBarSpace(barSpace, () => {
-      this._lastBarRightSideDiffBarCount += floatIndex - this.coordinateToFloatIndex(x)
+      // fixed 模式下保持 from（0 点）固定：不调整 lastBarRightSideDiffBarCount
+      if (!this._fixedVisibleRange) {
+        this._lastBarRightSideDiffBarCount += floatIndex - this.coordinateToFloatIndex(x)
+      }
     })
     const realScale = this._barSpace / prevBarSpace
     if (realScale !== 1) {
@@ -1333,6 +1344,9 @@ export default class StoreImp implements Store {
     this._fixedVisibleRange = { from, to }
     // 自动适配 barSpace：让固定范围内的数据铺满可视宽度（分时全天可见）。
     // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显。
+    if (this._barSpaceBeforeFixed === null) {
+      this._barSpaceBeforeFixed = this._barSpace
+    }
     const count = Math.max(1, to - from)
     if (this._totalBarSpace > 0 && count > 1) {
       const prevMin = this._layoutOptions.barSpaceLimit.min
@@ -1361,6 +1375,16 @@ export default class StoreImp implements Store {
       }
     } catch (e) {
       // ignore
+    }
+    // 恢复分时前的 barSpace（K 线视图不被分时的极小 barSpace 污染）。
+    if (this._barSpaceBeforeFixed !== null) {
+      const restore = this._barSpaceBeforeFixed
+      this._barSpaceBeforeFixed = null
+      try {
+        this.setBarSpace(restore)
+      } catch (e) {
+        // ignore
+      }
     }
     this._adjustVisibleRange()
     this._chart.layout({
