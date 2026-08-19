@@ -708,20 +708,16 @@ export default class StoreImp implements Store {
   }
 
   private _adjustVisibleRange(): void {
-    // Fixed visible range: anchor to the LATEST bar (to = totalBarCount), from = totalBarCount - visibleBarCount.
-    // 默认（全显）时 from=0（0 点最左）；放大时 from 增大（最新在右，0 点可移出），
-    // 缩小回到全天（0 点出现）。对齐股票分时图「缩放看最新」。
+    // Fixed visible range: from (0 点/交易时段开始) stays at 0 permanently.
+    // 0 轴之前永不出现（from 恒 0，不偏移）；缩放只改变 to（显示 0 到 to）。
     if (this._fixedVisibleRange) {
       const totalBarCount = this._dataList.length
       const visibleBarCount = this._totalBarSpace / this._barSpace
-      let to = this._fixedVisibleRange.to
-      if (to > totalBarCount || to <= 0) {
-        to = totalBarCount
-      }
-      let from = to - Math.max(1, Math.ceil(visibleBarCount))
+      let from = 0
+      let to = Math.max(1, Math.ceil(visibleBarCount))
       console.log('[klinecharts] _adjustVisibleRange fixed, totalBarCount=', totalBarCount, 'totalBarSpace=', this._totalBarSpace, 'barSpace=', this._barSpace, 'visibleBarCount=', visibleBarCount, 'from=', from, 'to=', to)
-      if (from < 0) {
-        from = 0
+      if (to > totalBarCount) {
+        to = totalBarCount
       }
       if (to < from) {
         to = from
@@ -1287,11 +1283,11 @@ export default class StoreImp implements Store {
     const zoomCoordinate: Partial<Coordinate> = coordinate ?? { x: this._crosshair.x ?? this._totalBarSpace / 2 }
 
     if (position === 'xAxis') {
-      if (this._zoomAnchor.xAxis === 'last_bar' || this._fixedVisibleRange) {
+      if (this._zoomAnchor.xAxis === 'last_bar') {
         zoomCoordinate.x = this.dataIndexToCoordinate(this._dataList.length - 1)
       }
     } else {
-      if (this._zoomAnchor.main === 'last_bar' || this._fixedVisibleRange) {
+      if (this._zoomAnchor.main === 'last_bar') {
         zoomCoordinate.x = this.dataIndexToCoordinate(this._dataList.length - 1)
       }
     }
