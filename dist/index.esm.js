@@ -1,6 +1,6 @@
 /**
      * @license
-     * KLineChart v10.0.2
+     * KLineChart v10.0.2-chartpro.2
      * Copyright (c) 2019 lihu.
      * Licensed under Apache License 2.0 https://www.apache.org/licenses/LICENSE-2.0
      */
@@ -491,7 +491,7 @@ function logError(api, invalidParam, append) {
     log('%c😟 klinecharts error%c %s%s%s', 'padding:3px 4px;border-radius:2px;color:#ffffff;background-color:#F92855;', 'color:#F92855;', api, invalidParam, append );
 }
 function logTag() {
-    log('%c❤️ Welcome to klinecharts. Version is 10.0.2', 'border-radius:4px;border:dashed 1px #1677FF;line-height:70px;padding:0 20px;margin:16px 0;font-size:14px;color:#1677FF;', '', '', '', '');
+    log('%c❤️ Welcome to klinecharts. Version is 10.0.2-chartpro.2', 'border-radius:4px;border:dashed 1px #1677FF;line-height:70px;padding:0 20px;margin:16px 0;font-size:14px;color:#1677FF;', '', '', '', '');
 }
 
 /**
@@ -13557,39 +13557,6 @@ var StoreImp = /** @class */ (function () {
     };
     StoreImp.prototype._adjustVisibleRange = function () {
         var _a, _b, _c;
-        // Fixed mode (timeshare): the X axis behaves like a ChartIQ fixed time range.
-        // - Left boundary: data index 0 (trade-session start) can never scroll past
-        //   the left edge, so no blank space appears before the 0 axis.
-        // - Right boundary: the CURRENT MINUTE (last bar with a valid close, skipping
-        //   trailing future close:null placeholders) can be pulled to the right edge,
-        //   so the latest price point never leaves the right side of the screen.
-        //   The future placeholders only act as blank space after the current line
-        //   when zoomed out; you can never pan into the future-only zone.
-        if (this._fixedVisibleRange) {
-            var dataCount = this._dataList.length;
-            var visibleBarCount_1 = this._totalBarSpace / this._barSpace;
-            // 当前分钟 = 最后一个 close 有效的 bar（跳过尾部未来 close:null 占位）。
-            var lastRealIndex = dataCount - 1;
-            while (lastRealIndex >= 0 && !isValid((_a = this._dataList[lastRealIndex]) === null || _a === void 0 ? void 0 : _a.close)) {
-                lastRealIndex--;
-            }
-            if (lastRealIndex < 0) {
-                lastRealIndex = 0;
-            }
-            // 左边界：0 轴前不空白（from < 0 ⇔ lastBarRightSide < visibleBarCount - dataCount + 0.5）
-            var leftMinOffset = visibleBarCount_1 - dataCount + 0.5;
-            // 右边界：当前分钟不超出右缘（iRight = dataCount + lastBarRightSide - 0.5 <= lastRealIndex）
-            // ⇒ lastBarRightSide <= lastRealIndex + 0.5 - dataCount。
-            // 缩小到全天时放宽到全天（未来留白可见）。
-            var rightMaxOffset = lastRealIndex + 0.5 - dataCount;
-            var maxOffset = Math.max(rightMaxOffset, leftMinOffset);
-            if (this._lastBarRightSideDiffBarCount < leftMinOffset) {
-                this._lastBarRightSideDiffBarCount = leftMinOffset;
-            }
-            if (this._lastBarRightSideDiffBarCount > maxOffset) {
-                this._lastBarRightSideDiffBarCount = maxOffset;
-            }
-        }
         var totalBarCount = this._dataList.length;
         var visibleBarCount = this._totalBarSpace / this._barSpace;
         var leftMinVisibleBarCount = 0;
@@ -13611,6 +13578,38 @@ var StoreImp = /** @class */ (function () {
         var minRightOffsetBarCount = -totalBarCount + Math.min(rightMinVisibleBarCount, totalBarCount);
         if (this._lastBarRightSideDiffBarCount < minRightOffsetBarCount) {
             this._lastBarRightSideDiffBarCount = minRightOffsetBarCount;
+        }
+        // Fixed mode (timeshare): 在通用 clamp 之后强制生效（fixed 约束永远赢）。
+        // 用户要求的边界（放大/缩小、平移时）：
+        // - 0 轴（交易时段开始，索引 0）的 x 坐标**可以为负数**（滑出屏幕左边），
+        //   但**不能 > 0**（0 轴前永远不出现空白；左缘最多到 0 轴贴边为止）。
+        // - 最新价（当前分钟 = 最后一个 close 有效的 bar，跳过尾部 close:null 未来占位）
+        //   左缘 x **不能小于 LATEST_LEFT_MARGIN px**（≈「不能小于 0 或 10」），
+        //   即最新价不能移出屏幕左边；
+        //   但最新价**可以大于屏幕右边**（右边界不再限制，像 K 线一样可滑出右侧）。
+        if (this._fixedVisibleRange) {
+            // 当前分钟 = 最后一个 close 有效的 bar（跳过尾部未来 close:null 占位）。
+            var lastRealIndex = totalBarCount - 1;
+            while (lastRealIndex >= 0 && !isValid((_a = this._dataList[lastRealIndex]) === null || _a === void 0 ? void 0 : _a.close)) {
+                lastRealIndex--;
+            }
+            if (lastRealIndex < 0) {
+                lastRealIndex = 0;
+            }
+            // 左边界：0 轴前不空白（bar0 左缘 x <= 0 ⇔ offset >= visibleBarCount - totalBarCount + 0.5）。
+            var leftMinOffset = visibleBarCount - totalBarCount + 0.5;
+            // 右上限：最新价左缘 x >= margin（px）。由 dataIndexToCoordinate 反推：
+            //   x_left(lastRealIndex) = totalBarSpace - (totalBarCount + offset - lastRealIndex - 0.5) * barSpace >= margin
+            //   ⇒ offset <= lastRealIndex + 0.5 + (visibleBarCount - margin / barSpace) - totalBarCount。
+            var latestLeftMargin = 10; // px，可调（0 ~ 10）
+            var latestLeftMaxOffset = lastRealIndex + 0.5 + (visibleBarCount - latestLeftMargin / this._barSpace) - totalBarCount;
+            var maxOffset = Math.max(latestLeftMaxOffset, leftMinOffset);
+            if (this._lastBarRightSideDiffBarCount < leftMinOffset) {
+                this._lastBarRightSideDiffBarCount = leftMinOffset;
+            }
+            if (this._lastBarRightSideDiffBarCount > maxOffset) {
+                this._lastBarRightSideDiffBarCount = maxOffset;
+            }
         }
         var to = Math.round(this._lastBarRightSideDiffBarCount + totalBarCount + 0.5);
         var realTo = to;
@@ -14124,10 +14123,13 @@ var StoreImp = /** @class */ (function () {
     };
     /**
      * Lock the X axis to a fixed data-index range [from, to].
-     * When set, the visible range is bounded by the 0 axis (left) and the current
-     * minute (right); zoom is still allowed but re-anchored to the current minute
-     * (ChartIQ-style fixed time range for the timeshare view). Use
-     * clearFixedVisibleRange() to unlock.
+     * When set, the timeshare view keeps these guardrails (enforced in
+     * _adjustVisibleRange):
+     * - the 0 axis can never leave blank space before it (x <= 0, may be negative);
+     * - the latest price (current minute) can never leave the LEFT edge
+     *   (left edge x >= ~10px), but MAY leave the RIGHT edge;
+     * - zoom/pan behaves like the K-line otherwise.
+     * Use clearFixedVisibleRange() to unlock.
      * barSpace is auto-adapted so the full range fits the drawing width.
      */
     StoreImp.prototype.setFixedVisibleRange = function (from, to) {
@@ -14146,6 +14148,9 @@ var StoreImp = /** @class */ (function () {
             this._layoutOptions.barSpaceLimit.min = Math.min(prevMin, Math.max(0.1, fixedMin));
             var space = Math.max(0.1, Math.min(this._layoutOptions.barSpaceLimit.max, fixedMin));
             this.setBarSpace(space);
+            // 固定模式初始定位：全天全显（0 轴贴左缘、右缘 = dataCount），
+            // 而不是沿用 K 线模式留下的偏移量。
+            this._lastBarRightSideDiffBarCount = this._totalBarSpace / this._barSpace - this._dataList.length + 0.5;
         }
         this._adjustVisibleRange();
         this._chart.layout({
@@ -15993,7 +15998,7 @@ var chartBaseId = 1;
  * @return {string}
  */
 function version() {
-    return '10.0.2';
+    return '10.0.2-chartpro.2';
 }
 /**
  * Init chart instance

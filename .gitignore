@@ -4,6 +4,9 @@
 /website
 # dist 提交进仓库：chartPro 以 git 依赖引用本 fork，npm 对 git 依赖不安装 devDependencies，
 # 无法在 prepare 里现场构建，只能提交构建产物。
+# dev UMD 及 sourcemap 不提交（git 依赖只用 min 版；App 走 esm/cjs）。
+/dist/umd/klinecharts.js
+/dist/umd/klinecharts.js.map
 /docs/.vitepress/cache
 /docs/node_modules
 
