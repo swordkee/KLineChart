@@ -708,24 +708,37 @@ export default class StoreImp implements Store {
   }
 
   private _adjustVisibleRange(): void {
-    // Fixed mode: allow zoom/scroll freely, but the left scroll boundary is the
-    // 0 axis (trade-session start). When scrolled/zoomed so the range would start
-    // before index 0, snap _lastBarRightSideDiffBarCount so dataIndex 0 sits at
-    // the left edge (x≈0) — no blank space appears before the 0 axis.
+    // Fixed mode (timeshare): the X axis behaves like a ChartIQ fixed time range.
+    // - Left boundary: data index 0 (trade-session start) can never scroll past
+    //   the left edge, so no blank space appears before the 0 axis.
+    // - Right boundary: the CURRENT MINUTE (last bar with a valid close, skipping
+    //   trailing future close:null placeholders) can be pulled to the right edge,
+    //   so the latest price point never leaves the right side of the screen.
+    //   The future placeholders only act as blank space after the current line
+    //   when zoomed out; you can never pan into the future-only zone.
     if (this._fixedVisibleRange) {
       const dataCount = this._dataList.length
       const visibleBarCount = this._totalBarSpace / this._barSpace
-      // 左边界：from < 0 时强制 0 轴在左缘（0 轴前无空白）。
-      // from < 0 ⇔ lastBarRightSide < visibleBarCount - dataCount
+      // 当前分钟 = 最后一个 close 有效的 bar（跳过尾部未来 close:null 占位）。
+      let lastRealIndex = dataCount - 1
+      while (lastRealIndex >= 0 && !isValid(this._dataList[lastRealIndex]?.close)) {
+        lastRealIndex--
+      }
+      if (lastRealIndex < 0) {
+        lastRealIndex = 0
+      }
+      // 左边界：0 轴前不空白（from < 0 ⇔ lastBarRightSide < visibleBarCount - dataCount + 0.5）
       const leftMinOffset = visibleBarCount - dataCount + 0.5
-      // 右边界：最新 bar（当前时间线）不超出右侧屏幕。
-      // dataIndexToCoordinate(dataCount-1) = totalBarSpace - (0.5 + lastBarRightSide)*barSpace
-      // 要求 <= totalBarSpace ⇒ lastBarRightSide >= -0.5
-      const rightMinOffset = -0.5
-      // 同时满足两个边界（取较大下限）
-      const minOffset = Math.max(leftMinOffset, rightMinOffset)
-      if (this._lastBarRightSideDiffBarCount < minOffset) {
-        this._lastBarRightSideDiffBarCount = minOffset
+      // 右边界：当前分钟不超出右缘（iRight = dataCount + lastBarRightSide - 0.5 <= lastRealIndex）
+      // ⇒ lastBarRightSide <= lastRealIndex + 0.5 - dataCount。
+      // 缩小到全天时放宽到全天（未来留白可见）。
+      const rightMaxOffset = lastRealIndex + 0.5 - dataCount
+      const maxOffset = Math.max(rightMaxOffset, leftMinOffset)
+      if (this._lastBarRightSideDiffBarCount < leftMinOffset) {
+        this._lastBarRightSideDiffBarCount = leftMinOffset
+      }
+      if (this._lastBarRightSideDiffBarCount > maxOffset) {
+        this._lastBarRightSideDiffBarCount = maxOffset
       }
     }
     const totalBarCount = this._dataList.length
@@ -1269,10 +1282,9 @@ export default class StoreImp implements Store {
     const prevBarSpace = this._barSpace
     const barSpace = this._barSpace + scale * (this._barSpace / SCALE_MULTIPLIER)
     this.setBarSpace(barSpace, () => {
-      // fixed 模式下保持 from（0 点）固定：不调整 lastBarRightSideDiffBarCount
-      if (!this._fixedVisibleRange) {
-        this._lastBarRightSideDiffBarCount += floatIndex - this.coordinateToFloatIndex(x)
-      }
+      // fixed 模式下同样按指针锚定（捏合/滚轮放大看哪就放大哪，ChartIQ 式缩放锚点），
+      // 边界（0 轴前不空白 / 进不了纯未来区）由 _adjustVisibleRange 的 floor/ceiling 收敛。
+      this._lastBarRightSideDiffBarCount += floatIndex - this.coordinateToFloatIndex(x)
     })
     const realScale = this._barSpace / prevBarSpace
     if (realScale !== 1) {
@@ -1316,22 +1328,27 @@ export default class StoreImp implements Store {
 
   /**
    * Lock the X axis to a fixed data-index range [from, to].
-   * When set, scroll and zoom are disabled and the visible range stays fixed.
-   * barSpace is auto-adapted so the full range fits the drawing width
-   * (used by timeshare fixed axis). Use clearFixedVisibleRange() to unlock.
+   * When set, the visible range is bounded by the 0 axis (left) and the current
+   * minute (right); zoom is still allowed but re-anchored to the current minute
+   * (ChartIQ-style fixed time range for the timeshare view). Use
+   * clearFixedVisibleRange() to unlock.
+   * barSpace is auto-adapted so the full range fits the drawing width.
    */
   setFixedVisibleRange(from: number, to: number): void {
     this._fixedVisibleRange = { from, to }
     // 自动适配 barSpace：让固定范围内的数据铺满可视宽度（分时全天可见）。
-    // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显。
+    // 临时放宽 barSpaceLimit.min（如 4 → 0.1），保证大量 bar 能全显；
+    // 同时把固定模式的最小 barSpace 限制在「全量刚好铺满」的档位，
+    // 避免再缩小导致数据挤到左侧、右侧大面积空白。
     if (this._barSpaceBeforeFixed === null) {
       this._barSpaceBeforeFixed = this._barSpace
     }
     const count = Math.max(1, to - from)
     if (this._totalBarSpace > 0 && count > 1) {
       const prevMin = this._layoutOptions.barSpaceLimit.min
-      this._layoutOptions.barSpaceLimit.min = Math.min(prevMin, 0.1)
-      const space = Math.max(0.1, Math.min(this._layoutOptions.barSpaceLimit.max, this._totalBarSpace / count))
+      const fixedMin = this._totalBarSpace / count
+      this._layoutOptions.barSpaceLimit.min = Math.min(prevMin, Math.max(0.1, fixedMin))
+      const space = Math.max(0.1, Math.min(this._layoutOptions.barSpaceLimit.max, fixedMin))
       this.setBarSpace(space)
     }
     this._adjustVisibleRange()

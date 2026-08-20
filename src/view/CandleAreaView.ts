@@ -48,10 +48,16 @@ export default class CandleAreaView extends ChildrenView {
     const pane = widget.getPane()
     const chart = pane.getChart()
     const dataList = chart.getDataList()
+    const styles = chart.getStyles().candle.area
     const lastDataIndex = dataList.length - 1
+    // 波纹点跟随「最后一个 value 有效的 bar」（分时跳过尾部未来 close:null 占位），
+    // 让当前分钟的价格点有闪动小球（对齐 Flutter drawPulseDot），而不是钉在未来占位。
+    let lastRealDataIndex = lastDataIndex
+    while (lastRealDataIndex >= 0 && !isNumber(dataList[lastRealDataIndex]?.[styles.value])) {
+      lastRealDataIndex--
+    }
     const bounding = widget.getBounding()
     const yAxis = pane.getYAxisComponentById()
-    const styles = chart.getStyles().candle.area
     const coordinates: Coordinate[] = []
     let minY = Number.MAX_SAFE_INTEGER
     let areaStartX: number = Number.MIN_SAFE_INTEGER
@@ -67,7 +73,7 @@ export default class CandleAreaView extends ChildrenView {
         }
         coordinates.push({ x, y })
         minY = Math.min(minY, y)
-        if (data.dataIndex === lastDataIndex) {
+        if (data.dataIndex === lastRealDataIndex) {
           ripplePointCoordinate = { x, y }
         }
       }

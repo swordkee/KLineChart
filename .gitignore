@@ -2,7 +2,8 @@
 /.idea
 /.vscode
 /website
-/dist
+# dist 提交进仓库：chartPro 以 git 依赖引用本 fork，npm 对 git 依赖不安装 devDependencies，
+# 无法在 prepare 里现场构建，只能提交构建产物。
 /docs/.vitepress/cache
 /docs/node_modules
 
